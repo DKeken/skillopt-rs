@@ -3,35 +3,16 @@ use crate::types::{ChatMessage, Edit, EditOp, RejectedEntry, StepBuffer, Traject
 use anyhow::Result;
 use serde::Deserialize;
 
-const REFLECT_SYS: &str = "You are SkillOpt, an optimizer that proposes structured edits to a skill document used by a frozen LLM agent.
+const REFLECT_SYS_FALLBACK: &str = "You are SkillOpt, an optimizer that proposes structured edits to a skill document used by a frozen LLM agent.\n\nReturn STRICT JSON: {\"edits\": [...], \"failure_patterns\": [...]}.";
 
-You will receive:
-- The current skill document.
-- A minibatch of trajectories (success or failure) the target produced.
-- A buffer of failure patterns and rejected past edits with the score drop they caused.
-
-Your job: propose between 0 and 8 structured edits to the skill that will help on the FAILURES without breaking the SUCCESSES. Edits must be small and reusable, never task-specific.
-
-Return STRICT JSON:
-{
-  \"edits\": [
-    {
-      \"op\": \"add\" | \"delete\" | \"replace\",
-      \"anchor\": \"verbatim line/heading from current skill (empty for plain add at end)\",
-      \"content\": \"new bullet/section to insert OR replacement text (ignored for delete)\",
-      \"rationale\": \"why this helps the failure pattern\",
-      \"utility\": 0.0 to 1.0
-    }
-  ],
-  \"failure_patterns\": [\"short phrases naming recurring failure modes\"]
+fn render_reflect(kind: &str, has_meta: bool) -> String {
+    use minijinja::context;
+    crate::templates::env()
+        .get_template("reflect")
+        .ok()
+        .and_then(|t| t.render(context! { kind => kind, has_meta => has_meta, token_limit => 2000 }).ok())
+        .unwrap_or_else(|| REFLECT_SYS_FALLBACK.to_string())
 }
-
-Guidelines:
-- Prefer add/replace over delete unless a rule clearly hurts.
-- Keep skill under 2000 tokens; prune dead weight when adding.
-- Do not repeat any rejected edit from the buffer.
-- If no useful edits, return {\"edits\": [], \"failure_patterns\": [...]}.
-";
 
 #[derive(Deserialize)]
 struct ReflectOut {
@@ -73,7 +54,7 @@ pub async fn reflect(
         batch.kind, skill, traj_block, buf, meta_block
     );
     let messages = [
-        ChatMessage { role: "system".into(), content: REFLECT_SYS.into() },
+        ChatMessage { role: "system".into(), content: render_reflect(batch.kind, !meta_memo.trim().is_empty()) },
         ChatMessage { role: "user".into(), content: user },
     ];
     let out = client.chat(&client.optimizer_model, &messages, ChatOptions {

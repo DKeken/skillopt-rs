@@ -7,4 +7,5 @@ pub mod memory;
 pub mod openai;
 pub mod scheduler;
 pub mod scoring;
+pub mod templates;
 pub mod types;

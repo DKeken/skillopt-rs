@@ -14,6 +14,7 @@ use skillopt::scoring::{mean, skill_hash};
 use skillopt::types::{Edit, GateDecision, RuntimeState, StepBuffer, StepRecord, Trajectory};
 use std::path::PathBuf;
 use std::sync::Arc;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use tracing::info;
 
 #[derive(Parser)]
@@ -83,6 +84,15 @@ async fn main() -> Result<()> {
     let sched = LrSchedule::from_str(&cfg.optimizer.lr_schedule);
     let steps_per_epoch = ((cfg.train.train_size as f32) / (cfg.train.batch_size * cfg.train.accumulation) as f32).ceil() as u32;
     let total_steps = cfg.train.num_epochs * steps_per_epoch.max(1);
+
+    // Progress UI
+    let mp = MultiProgress::new();
+    let total_pb = mp.add(ProgressBar::new(total_steps as u64));
+    total_pb.set_style(ProgressStyle::with_template(
+        "[{elapsed_precise}] {bar:30.cyan/blue} {pos}/{len} steps  best={msg}",
+    ).unwrap());
+    total_pb.set_position(step_idx as u64);
+    total_pb.set_message(format!("{:.3}", best_score));
 
     // Load latest meta-skill memo (cross-run persistence)
     let mut meta_memo = load_latest_meta(&cli.out_root).unwrap_or_default();
@@ -224,6 +234,8 @@ async fn main() -> Result<()> {
             };
             history.push(rec.clone());
             persist_step(&cli.out_root, step_idx, epoch, current_score, best_score, &skill, &best_skill, &rec, &history)?;
+            total_pb.set_position(step_idx as u64);
+            total_pb.set_message(format!("{:.3}", best_score));
         }
 
         // End-of-epoch hooks
@@ -247,6 +259,7 @@ async fn main() -> Result<()> {
     }
 
     std::fs::write(cli.out_root.join("best_skill.md"), &best_skill)?;
+    total_pb.finish_with_message(format!("done best={:.3}", best_score));
     println!("\nbest_sel_score = {:.3}", best_score);
     println!("artifact: {}", cli.out_root.join("best_skill.md").display());
     Ok(())

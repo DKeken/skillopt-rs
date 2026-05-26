@@ -1,9 +1,14 @@
 use anyhow::{anyhow, bail, Context, Result};
+use governor::{clock::DefaultClock, state::{InMemoryState, NotKeyed}, Quota, RateLimiter};
+use nonzero_ext::nonzero;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::types::ChatMessage;
+
+type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
 #[derive(Clone)]
 pub struct OpenAIClient {
@@ -13,6 +18,7 @@ pub struct OpenAIClient {
     pub target_model: String,
     pub optimizer_model: String,
     max_retries: u32,
+    limiter: Option<Arc<Limiter>>,
 }
 
 #[derive(Serialize)]
@@ -97,13 +103,23 @@ impl OpenAIClient {
         let max_retries = std::env::var("OPENAI_MAX_RETRIES").ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(4u32);
+        let rps = std::env::var("OPENAI_RPS").ok().and_then(|s| s.parse::<u32>().ok());
+        let limiter = rps.and_then(|n| std::num::NonZeroU32::new(n))
+            .map(|nz| Arc::new(RateLimiter::direct(Quota::per_second(nz))))
+            .or_else(|| {
+                // sensible default: cap at 30 req/s to be 9router-friendly under workers=24
+                Some(Arc::new(RateLimiter::direct(Quota::per_second(nonzero!(30u32)))))
+            });
         let http = Client::builder()
             .timeout(Duration::from_secs(timeout))
             .build()?;
-        Ok(Self { http, base_url, api_key, target_model, optimizer_model, max_retries })
+        Ok(Self { http, base_url, api_key, target_model, optimizer_model, max_retries, limiter })
     }
 
     pub async fn chat(&self, model: &str, messages: &[ChatMessage], opts: ChatOptions<'_>) -> Result<ChatOutcome> {
+        if let Some(lim) = &self.limiter {
+            lim.until_ready().await;
+        }
         let url = format!("{}/chat/completions", self.base_url);
         let body = ChatReq {
             model,
