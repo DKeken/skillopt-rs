@@ -227,12 +227,7 @@ impl Adapter for DocVQAAdapter {
 }
 
 fn score_docvqa(pred: &str, golds: &[String]) -> f32 {
-    let p = crate::scoring::normalize_answer(pred);
-    for g in golds {
-        let gn = crate::scoring::normalize_answer(g);
-        if p == gn || p.contains(&gn) || gn.contains(&p) { return 1.0; }
-    }
-    0.0
+    crate::scoring::anls(pred, golds, 0.5)
 }
 
 // ============== OfficeQA ==============
@@ -382,42 +377,16 @@ pub fn extract_calc(s: &str) -> Option<String> {
 }
 
 pub fn eval_calc(expr: &str) -> Option<f64> {
-    fn lex(s: &str) -> Vec<String> {
-        let mut out = vec![]; let mut buf = String::new();
-        for c in s.chars() {
-            if c.is_ascii_digit() || c == '.' { buf.push(c); }
-            else {
-                if !buf.is_empty() { out.push(std::mem::take(&mut buf)); }
-                if !c.is_whitespace() { out.push(c.to_string()); }
-            }
-        }
-        if !buf.is_empty() { out.push(buf); }
-        out
-    }
-    fn prec(op: &str) -> i32 { match op { "+" | "-" => 1, "*" | "/" => 2, _ => 0 } }
-    fn apply(op: &str, b: f64, a: f64) -> Option<f64> {
-        match op { "+" => Some(a+b), "-" => Some(a-b), "*" => Some(a*b), "/" => if b==0.0 {None} else {Some(a/b)}, _ => None }
-    }
-    let toks = lex(expr);
-    let mut out: Vec<String> = vec![]; let mut ops: Vec<String> = vec![];
-    for t in &toks {
-        if t.parse::<f64>().is_ok() { out.push(t.clone()); }
-        else if t == "(" { ops.push(t.clone()); }
-        else if t == ")" {
-            while let Some(top) = ops.last() { if top == "(" { break; } out.push(ops.pop()?); }
-            ops.pop()?;
-        } else {
-            while let Some(top) = ops.last() { if top == "(" || prec(top) < prec(t) { break; } out.push(ops.pop()?); }
-            ops.push(t.clone());
-        }
-    }
-    while let Some(o) = ops.pop() { out.push(o); }
-    let mut st: Vec<f64> = vec![];
-    for t in out {
-        if let Ok(n) = t.parse::<f64>() { st.push(n); }
-        else { let b = st.pop()?; let a = st.pop()?; st.push(apply(&t, b, a)?); }
-    }
-    st.pop()
+    use evalexpr::Value;
+    let promoted = expr.replace('/', "*1.0/");
+    let try_float = evalexpr::eval(&promoted);
+    let result = if try_float.is_ok() { try_float } else { evalexpr::eval(expr) };
+    let n = match result {
+        Ok(Value::Float(f)) => f,
+        Ok(Value::Int(i)) => i as f64,
+        _ => return None,
+    };
+    if n.is_finite() { Some(n) } else { None }
 }
 
 pub fn extract_final(s: &str) -> Option<String> {

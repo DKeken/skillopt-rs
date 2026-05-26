@@ -40,3 +40,32 @@ pub fn mean(xs: &[f32]) -> f32 {
     if xs.is_empty() { return 0.0; }
     xs.iter().sum::<f32>() / xs.len() as f32
 }
+
+/// ANLS = Average Normalized Levenshtein Similarity (Biten+ ICCV'19).
+/// Standard DocVQA metric. Score = max over gold answers of:
+///   1 - NL(pred, gold)  if NL < threshold,
+///   0                   otherwise.
+/// Default threshold τ = 0.5 per the paper.
+pub fn anls(pred: &str, golds: &[String], threshold: f32) -> f32 {
+    if pred.is_empty() || golds.is_empty() { return 0.0; }
+    let p = pred.to_lowercase();
+    golds.iter().map(|g| {
+        let g = g.to_lowercase();
+        let nl = strsim::normalized_levenshtein(&p, &g) as f32; // similarity, not distance
+        let nl_dist = 1.0 - nl;
+        if nl_dist < threshold { 1.0 - nl_dist } else { 0.0 }
+    }).fold(0.0_f32, f32::max)
+}
+
+/// Soft token count using tiktoken-rs (cl100k_base — fine for guard purposes).
+/// Cached singleton; falls back to char/4 heuristic if init fails.
+pub fn count_tokens(text: &str) -> usize {
+    use std::sync::OnceLock;
+    static BPE: OnceLock<Option<tiktoken_rs::CoreBPE>> = OnceLock::new();
+    let bpe = BPE.get_or_init(|| tiktoken_rs::cl100k_base().ok());
+    if let Some(b) = bpe {
+        b.encode_with_special_tokens(text).len()
+    } else {
+        text.len() / 4
+    }
+}

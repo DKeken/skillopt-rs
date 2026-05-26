@@ -3,7 +3,7 @@ use skillopt::gate::{evaluate_gate, GateInput};
 use skillopt::gradient::{apply_patch, merge_patches, rank_and_select, record_rejected};
 use skillopt::memory::replace_slow_update_field;
 use skillopt::scheduler::{autonomous_select, compute_lr, LrSchedule};
-use skillopt::scoring::{exact_match, normalize_answer, skill_hash};
+use skillopt::scoring::{anls, count_tokens, exact_match, normalize_answer, skill_hash};
 use skillopt::types::{Edit, EditOp, GateDecision, StepBuffer};
 
 fn e(op: EditOp, anchor: &str, content: &str, utility: f32, support: u32, source: &str) -> Edit {
@@ -268,4 +268,49 @@ fn extract_final_picks_last_final_line() {
     assert_eq!(extract_final(s).as_deref(), Some("42"));
     assert_eq!(extract_final("Final: forty\n").as_deref(), Some("forty"));
     assert_eq!(extract_final("no marker"), None);
+}
+
+#[test]
+fn anls_perfect_match_is_one() {
+    let golds = vec!["Coca Cola".to_string(), "Coca Cola Company".into()];
+    assert!((anls("Coca Cola", &golds, 0.5) - 1.0).abs() < 1e-4);
+}
+
+#[test]
+fn anls_close_match_above_threshold() {
+    let golds = vec!["Coca Cola".to_string()];
+    let s = anls("CocaCola", &golds, 0.5);
+    assert!(s > 0.5 && s < 1.0, "got {}", s);
+}
+
+#[test]
+fn anls_far_mismatch_returns_zero() {
+    let golds = vec!["Coca Cola".to_string()];
+    assert_eq!(anls("Pepsi", &golds, 0.5), 0.0);
+}
+
+#[test]
+fn anls_empty_inputs_zero() {
+    let golds = vec!["x".to_string()];
+    assert_eq!(anls("", &golds, 0.5), 0.0);
+    assert_eq!(anls("x", &[], 0.5), 0.0);
+}
+
+#[test]
+fn count_tokens_returns_nonzero_for_text() {
+    let n = count_tokens("hello world this is a sentence");
+    assert!(n > 0 && n < 20, "got {}", n);
+}
+
+#[test]
+fn count_tokens_grows_with_length() {
+    let a = count_tokens("short");
+    let b = count_tokens(&"long ".repeat(200));
+    assert!(b > a * 50, "a={} b={}", a, b);
+}
+
+#[test]
+fn eval_calc_powers_via_evalexpr() {
+    assert_eq!(eval_calc("2 ^ 8"), Some(256.0));
+    assert_eq!(eval_calc("3 ^ 4"), Some(81.0));
 }
