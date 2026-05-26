@@ -1,0 +1,4 @@
+[
+  {"id":"v1","question":"Capital of Japan","context":"[DOC] Tokyo is the capital of Japan.","answers":["Tokyo"]},
+  {"id":"v2","question":"Inventor of telephone","context":"[DOC] Alexander Graham Bell invented the telephone.","answers":["Alexander Graham Bell"]}
+]

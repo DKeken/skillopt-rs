@@ -1,0 +1,5 @@
+/target
+/outputs
+.env
+*.swp
+.DS_Store

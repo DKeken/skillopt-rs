@@ -1,0 +1,32 @@
+env:
+  name: searchqa
+  skill_init: configs/skills/searchqa_initial.md
+  max_turns: 1
+
+train:
+  train_size: 8
+  batch_size: 4
+  accumulation: 1
+  num_epochs: 1
+
+gradient:
+  minibatch_size: 4
+  merge_batch_size: 4
+
+optimizer:
+  learning_rate: 3
+  lr_schedule: cosine
+  use_rejected_buffer: true
+  use_slow_update: false
+  use_meta_skill: false
+  full_rewrite_every: 0
+
+evaluation:
+  sel_split: valid_seen
+  test_split: valid_unseen
+  workers: 4
+
+model:
+  reasoning_effort: medium
+  temperature_target: 0.0
+  temperature_optimizer: 0.7

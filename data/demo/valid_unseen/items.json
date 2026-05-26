@@ -1,0 +1,8 @@
+[
+  {"id":"u1","question":"Who founded Google?","context":"[DOC] Google was founded by Larry Page and Sergey Brin while they were Ph.D. students at Stanford in 1998.","answers":["Larry Page"]},
+  {"id":"u2","question":"What is the capital of Canada?","context":"[DOC] Ottawa serves as the capital of Canada, although Toronto is the most populous city.","answers":["Ottawa"]},
+  {"id":"u3","question":"Who composed the Ninth Symphony?","context":"[DOC] The Ninth Symphony was composed by Ludwig van Beethoven between 1822 and 1824.","answers":["Beethoven","Ludwig van Beethoven"]},
+  {"id":"u4","question":"What does GPU stand for?","context":"[DOC] GPU stands for Graphics Processing Unit, a chip specialized for parallel computation.","answers":["Graphics Processing Unit"]},
+  {"id":"u5","question":"What planet is closest to the Sun?","context":"[DOC] Mercury is the closest planet to the Sun, orbiting at roughly 58 million kilometers.","answers":["Mercury"]},
+  {"id":"u6","question":"Who painted The Starry Night?","context":"[DOC] The Starry Night was painted by Vincent van Gogh in 1889 while he stayed at a hospital in Saint-Rémy.","answers":["van Gogh","Vincent van Gogh"]}
+]

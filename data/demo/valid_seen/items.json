@@ -1,0 +1,6 @@
+[
+  {"id":"s1","question":"Who founded Microsoft?","context":"[DOC] Microsoft was founded by Bill Gates and Paul Allen in 1975.","answers":["Bill Gates"]},
+  {"id":"s2","question":"What is the capital of Brazil?","context":"[DOC] Brasília is the capital of Brazil, while Rio de Janeiro and São Paulo are larger cities.","answers":["Brasília","Brasilia"]},
+  {"id":"s3","question":"Who wrote 'The Odyssey'?","context":"[DOC] The Odyssey is an ancient Greek epic poem attributed to Homer.","answers":["Homer"]},
+  {"id":"s4","question":"What does NASA stand for?","context":"[DOC] NASA stands for the National Aeronautics and Space Administration.","answers":["National Aeronautics and Space Administration"]}
+]

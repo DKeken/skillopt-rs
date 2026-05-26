@@ -1,0 +1,12 @@
+[
+  {"id":"d1","question":"Who founded Apple?","context":"[DOC] Apple was co-founded by Steve Jobs, Steve Wozniak, and Ronald Wayne in 1976.","answers":["Steve Jobs"]},
+  {"id":"d2","question":"Where is the Eiffel Tower?","context":"[DOC] The Eiffel Tower stands in Paris, France, on the Champ de Mars.","answers":["Paris"]},
+  {"id":"d3","question":"What is the capital of Australia?","context":"[DOC] Canberra is the capital of Australia, although Sydney is the largest city.","answers":["Canberra"]},
+  {"id":"d4","question":"Who wrote Hamlet?","context":"[DOC] Hamlet is a tragedy written by William Shakespeare around 1600.","answers":["Shakespeare"]},
+  {"id":"d5","question":"What does HTTP stand for?","context":"[DOC] HTTP stands for HyperText Transfer Protocol.","answers":["HyperText Transfer Protocol"]},
+  {"id":"d6","question":"Who painted the Mona Lisa?","context":"[DOC] The Mona Lisa was painted by Leonardo da Vinci in the early 1500s.","answers":["Leonardo da Vinci"]},
+  {"id":"d7","question":"What year did WW2 end?","context":"[DOC] World War II ended in 1945 with the surrender of Japan in September.","answers":["1945"]},
+  {"id":"d8","question":"What is the largest ocean?","context":"[DOC] The Pacific Ocean is the largest and deepest ocean on Earth.","answers":["Pacific"]},
+  {"id":"d9","question":"Who discovered penicillin?","context":"[DOC] Alexander Fleming discovered penicillin in 1928 at St Mary's Hospital, London.","answers":["Alexander Fleming"]},
+  {"id":"d10","question":"What gas do plants absorb?","context":"[DOC] During photosynthesis, plants absorb carbon dioxide from the atmosphere.","answers":["carbon dioxide"]}
+]

@@ -1,0 +1,10 @@
+[
+  {"id":"q1","question":"Capital of France","context":"[DOC] Paris is the capital of France.","answers":["Paris"]},
+  {"id":"q2","question":"Author of 1984","context":"[DOC] George Orwell wrote 1984.","answers":["George Orwell","Orwell"]},
+  {"id":"q3","question":"Largest planet","context":"[DOC] Jupiter is the largest planet in the Solar System.","answers":["Jupiter"]},
+  {"id":"q4","question":"Speed of light km/s","context":"[DOC] Light travels at about 299792 km/s in vacuum.","answers":["299792"]},
+  {"id":"q5","question":"H2O common name","context":"[DOC] H2O is commonly known as water.","answers":["water"]},
+  {"id":"q6","question":"Founder of Microsoft","context":"[DOC] Microsoft was co-founded by Bill Gates and Paul Allen.","answers":["Bill Gates","Paul Allen"]},
+  {"id":"q7","question":"Fastest land animal","context":"[DOC] The cheetah is the fastest land animal.","answers":["cheetah"]},
+  {"id":"q8","question":"Currency of Japan","context":"[DOC] The currency of Japan is the yen.","answers":["yen","Japanese yen"]}
+]
