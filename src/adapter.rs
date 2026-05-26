@@ -76,9 +76,100 @@ impl Adapter for SearchQAAdapter {
     }
 }
 
+pub struct LiveMathAdapter;
+
+#[async_trait::async_trait]
+impl Adapter for LiveMathAdapter {
+    async fn rollout(
+        &self,
+        client: &OpenAIClient,
+        skill: &str,
+        items: &[TaskItem],
+        workers: usize,
+        temperature: f32,
+    ) -> Result<Vec<Trajectory>> {
+        let model = client.target_model.clone();
+        let skill = skill.to_string();
+        let results: Vec<Result<Trajectory>> = stream::iter(items.iter().cloned())
+            .map(|item| {
+                let client = client.clone();
+                let model = model.clone();
+                let skill = skill.clone();
+                async move {
+                    let messages = vec![
+                        ChatMessage {
+                            role: "system".into(),
+                            content: format!("You are a math problem solver. Follow this skill exactly.\n\n---SKILL---\n{}\n---END SKILL---", skill),
+                        },
+                        ChatMessage {
+                            role: "user".into(),
+                            content: item.question.clone(),
+                        },
+                    ];
+                    let out = client.chat(&model, &messages, ChatOptions {
+                        temperature: Some(temperature),
+                        max_tokens: Some(800),
+                        json: false,
+                        reasoning_effort: None,
+                    }).await?;
+                    let pred = out.text.trim().to_string();
+                    let score = score_numeric(&pred, &item.answers);
+                    Ok::<_, anyhow::Error>(Trajectory {
+                        item_id: item.id.clone(),
+                        prediction: pred,
+                        score,
+                        messages,
+                    })
+                }
+            })
+            .buffer_unordered(workers.max(1))
+            .collect()
+            .await;
+        let mut traj = Vec::with_capacity(results.len());
+        for r in results { traj.push(r?); }
+        Ok(traj)
+    }
+
+    fn score(&self, item: &TaskItem, prediction: &str) -> f32 {
+        score_numeric(prediction, &item.answers)
+    }
+}
+
+fn score_numeric(pred: &str, golds: &[String]) -> f32 {
+    let last = extract_last_number(pred);
+    for g in golds {
+        if let (Some(p), Some(gn)) = (last, parse_number(g)) {
+            if (p - gn).abs() < 1e-6 { return 1.0; }
+        }
+    }
+    0.0
+}
+
+fn extract_last_number(s: &str) -> Option<f64> {
+    let mut last: Option<f64> = None;
+    let mut buf = String::new();
+    for c in s.chars().chain(std::iter::once(' ')) {
+        if c.is_ascii_digit() || c == '.' || c == '-' {
+            buf.push(c);
+        } else {
+            if !buf.is_empty() {
+                if let Ok(n) = buf.parse::<f64>() { last = Some(n); }
+                buf.clear();
+            }
+        }
+    }
+    last
+}
+
+fn parse_number(s: &str) -> Option<f64> {
+    s.trim().replace(',', "").parse().ok()
+}
+
+
 pub fn build_adapter(name: &str) -> Box<dyn Adapter> {
     match name {
         "searchqa" => Box::new(SearchQAAdapter),
+        "livemath" => Box::new(LiveMathAdapter),
         other => panic!("unknown adapter: {}", other),
     }
 }

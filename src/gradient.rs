@@ -51,6 +51,7 @@ pub async fn reflect(
     skill: &str,
     batch: &ReflectBatch<'_>,
     buffer: &StepBuffer,
+    meta_memo: &str,
     temperature: f32,
     reasoning_effort: &str,
 ) -> Result<(Vec<Edit>, Vec<String>)> {
@@ -62,9 +63,14 @@ pub async fn reflect(
         }
     }
     let buf = format_buffer(buffer);
+    let meta_block = if meta_memo.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\n=== OPTIMIZER MEMORY (cross-epoch lessons) ===\n{}", meta_memo)
+    };
     let user = format!(
-        "MINIBATCH KIND: {}\n\n=== CURRENT SKILL ===\n{}\n\n=== TRAJECTORIES ===\n{}\n\n=== BUFFER ===\n{}",
-        batch.kind, skill, traj_block, buf
+        "MINIBATCH KIND: {}\n\n=== CURRENT SKILL ===\n{}\n\n=== TRAJECTORIES ===\n{}\n\n=== BUFFER ===\n{}{}",
+        batch.kind, skill, traj_block, buf, meta_block
     );
     let messages = [
         ChatMessage { role: "system".into(), content: REFLECT_SYS.into() },
@@ -203,4 +209,39 @@ pub fn record_rejected(buffer: &mut StepBuffer, edits: Vec<Edit>, drop: f32, rat
     if buffer.rejected.len() > 12 {
         buffer.rejected.remove(0);
     }
+}
+
+const FULL_REWRITE_SYS: &str = "You are SkillOpt's full-rewrite optimizer. Given a current skill document, recent failure trajectories, and the rejected-edit buffer, produce a NEW complete skill document (markdown). Constraints: ≤ 2000 tokens, must address the dominant failure pattern, must preserve any rule that the success-trajectories rely on, must NOT reintroduce any rejected edit verbatim. Output ONLY the new skill markdown — no JSON, no commentary.";
+
+pub async fn full_rewrite(
+    client: &OpenAIClient,
+    skill: &str,
+    failures: &[Trajectory],
+    successes: &[Trajectory],
+    buffer: &StepBuffer,
+    temperature: f32,
+    reasoning_effort: &str,
+) -> Result<String> {
+    let mut block = String::new();
+    for (label, traj) in [("FAILURES", failures), ("SUCCESSES", successes)] {
+        block.push_str(&format!("\n=== {} ===\n", label));
+        for t in traj.iter().take(8) {
+            block.push_str(&format!("- item={} score={:.2} pred={}\n", t.item_id, t.score, truncate(&t.prediction, 200)));
+        }
+    }
+    let user = format!(
+        "=== CURRENT SKILL ===\n{}\n{}\n=== REJECTED BUFFER ===\n{}\n",
+        skill, block, format_buffer(buffer)
+    );
+    let messages = [
+        ChatMessage { role: "system".into(), content: FULL_REWRITE_SYS.into() },
+        ChatMessage { role: "user".into(), content: user },
+    ];
+    let out = client.chat(&client.optimizer_model, &messages, ChatOptions {
+        temperature: Some(temperature),
+        max_tokens: Some(3000),
+        json: false,
+        reasoning_effort: Some(reasoning_effort),
+    }).await?;
+    Ok(out.text.trim().to_string())
 }

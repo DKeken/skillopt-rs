@@ -82,3 +82,13 @@ pub struct StepRecord {
     pub n_selected: u32,
     pub skill_hash: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RuntimeState {
+    pub step: u32,
+    pub epoch: u32,
+    pub current_score: f32,
+    pub best_score: f32,
+    pub current_skill_path: String,
+    pub best_skill_path: String,
+}

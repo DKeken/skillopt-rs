@@ -5,13 +5,13 @@ use skillopt::config::load_config;
 use skillopt::data::{load_split, sample_batch};
 use skillopt::gate::{evaluate_gate, GateInput};
 use skillopt::gradient::{
-    apply_patch, merge_patches, rank_and_select, record_rejected, reflect, ReflectBatch,
+    apply_patch, full_rewrite, merge_patches, rank_and_select, record_rejected, reflect, ReflectBatch,
 };
 use skillopt::memory::{replace_slow_update_field, run_meta_skill, run_slow_update};
 use skillopt::openai::OpenAIClient;
 use skillopt::scheduler::{compute_lr, LrSchedule};
 use skillopt::scoring::{mean, skill_hash};
-use skillopt::types::{Edit, GateDecision, StepBuffer, StepRecord, Trajectory};
+use skillopt::types::{Edit, GateDecision, RuntimeState, StepBuffer, StepRecord, Trajectory};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
@@ -41,28 +41,58 @@ async fn main() -> Result<()> {
 
     let train_pool = sample_batch(&train_items, cfg.train.train_size, 42);
 
-    let mut skill = std::fs::read_to_string(&cfg.env.skill_init)
-        .with_context(|| format!("read skill_init {}", cfg.env.skill_init))?;
-    let mut best_skill = skill.clone();
-    let _ = std::fs::write(cli.out_root.join("skills/skill_v0000.md"), &skill);
+    // === Resume detection ===
+    let resume = try_load_resume(&cli.out_root)?;
+    let mut skill;
+    let mut best_skill;
+    let mut current_score;
+    let mut best_score;
+    let mut history: Vec<StepRecord>;
+    let mut step_idx: u32;
+    let starting_epoch: u32;
 
-    let baseline = adapter
-        .rollout(&client, &skill, &sel_items, cfg.evaluation.workers, cfg.model.temperature_target)
-        .await?;
-    let mut current_score = mean(&baseline.iter().map(|t| t.score).collect::<Vec<_>>());
-    let mut best_score = current_score;
-    info!("baseline sel_score = {:.3}", baseline_pretty(current_score));
+    if let Some((state, hist)) = resume {
+        skill = std::fs::read_to_string(cli.out_root.join(&state.current_skill_path))
+            .with_context(|| format!("read resume current_skill {}", state.current_skill_path))?;
+        best_skill = std::fs::read_to_string(cli.out_root.join(&state.best_skill_path))
+            .unwrap_or_else(|_| skill.clone());
+        current_score = state.current_score;
+        best_score = state.best_score;
+        history = hist;
+        step_idx = state.step;
+        starting_epoch = state.epoch.max(1);
+        info!("RESUME at step={} epoch={} current={:.3} best={:.3}",
+            step_idx, starting_epoch, current_score, best_score);
+    } else {
+        skill = std::fs::read_to_string(&cfg.env.skill_init)
+            .with_context(|| format!("read skill_init {}", cfg.env.skill_init))?;
+        best_skill = skill.clone();
+        let _ = std::fs::write(cli.out_root.join("skills/skill_v0000.md"), &skill);
+
+        let baseline = adapter
+            .rollout(&client, &skill, &sel_items, cfg.evaluation.workers, cfg.model.temperature_target)
+            .await?;
+        current_score = mean(&baseline.iter().map(|t| t.score).collect::<Vec<_>>());
+        best_score = current_score;
+        history = vec![];
+        step_idx = 0;
+        starting_epoch = 1;
+        info!("baseline sel_score = {:.3}", current_score);
+    }
 
     let sched = LrSchedule::from_str(&cfg.optimizer.lr_schedule);
     let steps_per_epoch = ((cfg.train.train_size as f32) / (cfg.train.batch_size * cfg.train.accumulation) as f32).ceil() as u32;
     let total_steps = cfg.train.num_epochs * steps_per_epoch.max(1);
 
-    let mut history: Vec<StepRecord> = vec![];
-    let mut step_idx: u32 = 0;
+    // Load latest meta-skill memo (cross-run persistence)
+    let mut meta_memo = load_latest_meta(&cli.out_root).unwrap_or_default();
+    if !meta_memo.is_empty() {
+        info!("loaded prior meta-skill memo ({} chars)", meta_memo.len());
+    }
 
     let mut prev_epoch_skill = skill.clone();
 
-    for epoch in 1..=cfg.train.num_epochs {
+    for epoch in starting_epoch..=cfg.train.num_epochs {
         let mut step_buffer = StepBuffer::default();
         info!("=== epoch {epoch}/{} ===", cfg.train.num_epochs);
 
@@ -89,6 +119,7 @@ async fn main() -> Result<()> {
                     &client, &skill,
                     &ReflectBatch { trajectories: chunk, kind: "failure" },
                     &step_buffer,
+                    &meta_memo,
                     cfg.model.temperature_optimizer,
                     &cfg.model.reasoning_effort,
                 ).await?;
@@ -104,6 +135,7 @@ async fn main() -> Result<()> {
                     &client, &skill,
                     &ReflectBatch { trajectories: chunk, kind: "success" },
                     &step_buffer,
+                    &meta_memo,
                     cfg.model.temperature_optimizer,
                     &cfg.model.reasoning_effort,
                 ).await?;
@@ -119,8 +151,16 @@ async fn main() -> Result<()> {
             let patch = rank_and_select(merged, lr);
             let n_selected = patch.len() as u32;
 
-            // 5. Update
-            let candidate = apply_patch(&skill, &patch);
+            // 5. Update — bounded patch OR full rewrite
+            let do_full = cfg.optimizer.full_rewrite_every > 0
+                && step_idx % cfg.optimizer.full_rewrite_every == 0;
+            let candidate = if do_full {
+                info!("step {step_idx}: full-rewrite path");
+                full_rewrite(&client, &skill, &fail, &succ, &step_buffer,
+                    cfg.model.temperature_optimizer, &cfg.model.reasoning_effort).await?
+            } else {
+                apply_patch(&skill, &patch)
+            };
             let cand_hash = skill_hash(&candidate);
 
             // 6. Gate
@@ -179,7 +219,7 @@ async fn main() -> Result<()> {
                 skill_hash: cand_hash,
             };
             history.push(rec.clone());
-            persist_step(&cli.out_root, step_idx, &skill, &best_skill, &rec, &history)?;
+            persist_step(&cli.out_root, step_idx, epoch, current_score, best_score, &skill, &best_skill, &rec, &history)?;
         }
 
         // End-of-epoch hooks
@@ -196,7 +236,8 @@ async fn main() -> Result<()> {
             let pairs = build_pairs(&adapter, &client, &prev_epoch_skill, &skill, &train_pool, &cfg).await?;
             let memo = run_meta_skill(&client, &pairs, cfg.model.temperature_optimizer, &cfg.model.reasoning_effort).await?;
             std::fs::create_dir_all(cli.out_root.join(format!("meta_skill/epoch_{epoch:02}")))?;
-            std::fs::write(cli.out_root.join(format!("meta_skill/epoch_{epoch:02}/memo.md")), memo)?;
+            std::fs::write(cli.out_root.join(format!("meta_skill/epoch_{epoch:02}/memo.md")), &memo)?;
+            meta_memo = memo;
         }
         prev_epoch_skill = skill.clone();
     }
@@ -207,7 +248,43 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn baseline_pretty(x: f32) -> f32 { x }
+fn load_latest_meta(out_root: &std::path::Path) -> Option<String> {
+    let dir = out_root.join("meta_skill");
+    if !dir.exists() { return None; }
+    let mut best: Option<(u32, std::path::PathBuf)> = None;
+    for ent in std::fs::read_dir(&dir).ok()? {
+        let ent = ent.ok()?;
+        let name = ent.file_name();
+        let s = name.to_string_lossy();
+        if let Some(rest) = s.strip_prefix("epoch_") {
+            if let Ok(n) = rest.parse::<u32>() {
+                let memo = ent.path().join("memo.md");
+                if memo.exists() && best.as_ref().map_or(true, |(b, _)| n > *b) {
+                    best = Some((n, memo));
+                }
+            }
+        }
+    }
+    best.and_then(|(_, p)| std::fs::read_to_string(p).ok())
+}
+
+fn try_load_resume(out_root: &std::path::Path) -> Result<Option<(RuntimeState, Vec<StepRecord>)>> {
+    let state_path = out_root.join("runtime_state.json");
+    if !state_path.exists() { return Ok(None); }
+    let state: RuntimeState = serde_json::from_str(&std::fs::read_to_string(&state_path)?)?;
+    if state.step == 0 { return Ok(None); }
+    let hist_path = out_root.join("history.jsonl");
+    let mut hist = vec![];
+    if hist_path.exists() {
+        for line in std::fs::read_to_string(&hist_path)?.lines() {
+            if line.trim().is_empty() { continue; }
+            if let Ok(rec) = serde_json::from_str::<StepRecord>(line) {
+                hist.push(rec);
+            }
+        }
+    }
+    Ok(Some((state, hist)))
+}
 
 async fn build_pairs(
     adapter: &Box<dyn Adapter>,
@@ -230,6 +307,9 @@ async fn build_pairs(
 fn persist_step(
     out_root: &std::path::Path,
     step: u32,
+    epoch: u32,
+    current_score: f32,
+    best_score: f32,
     skill: &str,
     best_skill: &str,
     rec: &StepRecord,
@@ -238,12 +318,20 @@ fn persist_step(
     let dir = out_root.join(format!("steps/step_{:04}", step));
     std::fs::create_dir_all(&dir)?;
     std::fs::write(dir.join("record.json"), serde_json::to_string_pretty(rec)?)?;
-    std::fs::write(out_root.join(format!("skills/skill_v{:04}.md", step)), skill)?;
+    let cur_path = format!("skills/skill_v{:04}.md", step);
+    std::fs::write(out_root.join(&cur_path), skill)?;
     std::fs::write(out_root.join("best_skill.md"), best_skill)?;
     let mut hist_lines = String::new();
     for r in history { hist_lines.push_str(&serde_json::to_string(r)?); hist_lines.push('\n'); }
     std::fs::write(out_root.join("history.jsonl"), hist_lines)?;
-    let state = serde_json::json!({ "step": step, "best_sel_score": rec.best_sel_score });
+    let state = RuntimeState {
+        step,
+        epoch,
+        current_score,
+        best_score,
+        current_skill_path: cur_path,
+        best_skill_path: "best_skill.md".into(),
+    };
     std::fs::write(out_root.join("runtime_state.json"), serde_json::to_string_pretty(&state)?)?;
     Ok(())
 }
