@@ -1,7 +1,8 @@
+use skillopt::adapter::{eval_calc, extract_calc, extract_final};
 use skillopt::gate::{evaluate_gate, GateInput};
 use skillopt::gradient::{apply_patch, merge_patches, rank_and_select, record_rejected};
 use skillopt::memory::replace_slow_update_field;
-use skillopt::scheduler::{compute_lr, LrSchedule};
+use skillopt::scheduler::{autonomous_select, compute_lr, LrSchedule};
 use skillopt::scoring::{exact_match, normalize_answer, skill_hash};
 use skillopt::types::{Edit, EditOp, GateDecision, StepBuffer};
 
@@ -211,4 +212,60 @@ fn skill_hash_is_deterministic_and_short() {
     assert_eq!(a, b);
     assert_ne!(a, c);
     assert_eq!(a.len(), 16);
+}
+
+#[test]
+fn autonomous_select_respects_confidence_budget() {
+    let edits = vec![
+        e(EditOp::Add, "", "a", 0.9, 4, "failure"),
+        e(EditOp::Add, "", "b", 0.4, 1, "failure"),
+        e(EditOp::Add, "", "c", 0.3, 1, "failure"),
+        e(EditOp::Add, "", "d", 0.1, 1, "failure"),
+    ];
+    let picked = autonomous_select(edits, 1.5, 8);
+    assert!(picked.len() >= 1 && picked.len() <= 4);
+    assert_eq!(picked[0].content, "a");
+}
+
+#[test]
+fn autonomous_select_respects_cap() {
+    let edits = (0..50).map(|i| e(EditOp::Add, "", &format!("e{}", i), 0.01, 1, "failure")).collect();
+    let picked = autonomous_select(edits, 100.0, 4);
+    assert_eq!(picked.len(), 4);
+}
+
+#[test]
+fn lr_schedule_autonomous_falls_back_to_constant_for_compute_lr() {
+    let s = LrSchedule::Autonomous;
+    assert_eq!(compute_lr(&s, 0, 100, 4), 4);
+    assert_eq!(compute_lr(&s, 50, 100, 4), 4);
+    assert_eq!(compute_lr(&s, 100, 100, 4), 4);
+}
+
+#[test]
+fn extract_calc_pulls_expression_from_tool_tag() {
+    let s = "I will compute <tool name=\"calc\">12 + 30</tool> next";
+    assert_eq!(extract_calc(s), Some("12 + 30".to_string()));
+}
+
+#[test]
+fn extract_calc_returns_none_when_absent() {
+    assert_eq!(extract_calc("just text"), None);
+}
+
+#[test]
+fn eval_calc_handles_basic_arithmetic_and_precedence() {
+    assert_eq!(eval_calc("2 + 3"), Some(5.0));
+    assert_eq!(eval_calc("2 + 3 * 4"), Some(14.0));
+    assert_eq!(eval_calc("(2 + 3) * 4"), Some(20.0));
+    assert_eq!(eval_calc("10 / 4"), Some(2.5));
+    assert_eq!(eval_calc("10 / 0"), None);
+}
+
+#[test]
+fn extract_final_picks_last_final_line() {
+    let s = "thinking...\nFINAL: 42\n";
+    assert_eq!(extract_final(s).as_deref(), Some("42"));
+    assert_eq!(extract_final("Final: forty\n").as_deref(), Some("forty"));
+    assert_eq!(extract_final("no marker"), None);
 }

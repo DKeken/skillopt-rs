@@ -9,7 +9,7 @@ use skillopt::gradient::{
 };
 use skillopt::memory::{replace_slow_update_field, run_meta_skill, run_slow_update};
 use skillopt::openai::OpenAIClient;
-use skillopt::scheduler::{compute_lr, LrSchedule};
+use skillopt::scheduler::{autonomous_select, compute_lr, LrSchedule};
 use skillopt::scoring::{mean, skill_hash};
 use skillopt::types::{Edit, GateDecision, RuntimeState, StepBuffer, StepRecord, Trajectory};
 use std::path::PathBuf;
@@ -146,9 +146,13 @@ async fn main() -> Result<()> {
             let merged = merge_patches(all_failure_edits, all_success_edits);
             let n_proposed = merged.len() as u32;
 
-            // 4. Select under edit budget
+            // 4. Select under edit budget (cosine/linear/constant) OR autonomous
             let lr = compute_lr(&sched, step_idx - 1, total_steps, cfg.optimizer.learning_rate);
-            let patch = rank_and_select(merged, lr);
+            let patch = if matches!(sched, LrSchedule::Autonomous) {
+                autonomous_select(merged, 1.5, cfg.optimizer.learning_rate.max(8))
+            } else {
+                rank_and_select(merged, lr)
+            };
             let n_selected = patch.len() as u32;
 
             // 5. Update — bounded patch OR full rewrite
